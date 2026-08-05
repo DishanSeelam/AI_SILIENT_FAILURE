@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments and secrets
+.venv/
+venv/
+.env
+
+# Local data, models, logs, and databases
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/raw/ecommerce_transactions.csv
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+logs/*
+!logs/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# Notebook checkpoints and editors
+.ipynb_checkpoints/
+.vscode/
+.idea/
