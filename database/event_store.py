@@ -43,6 +43,18 @@ def initialize_database() -> None:
             );
             """
         )
+        for column, definition in [
+            ("model_version", "TEXT"), ("model_stage", "TEXT"), ("validation_status", "TEXT"),
+            ("drift_status", "TEXT"), ("skew_status", "TEXT"), ("health_score", "INTEGER"),
+            ("failure_type", "TEXT"), ("severity", "TEXT"),
+        ]:
+            existing = {row[1] for row in connection.execute("PRAGMA table_info(prediction_events)")}
+            if column not in existing:
+                connection.execute(f"ALTER TABLE prediction_events ADD COLUMN {column} {definition}")
+        for column, definition in [("validation_status", "TEXT"), ("drift_status", "TEXT"), ("skew_status", "TEXT"), ("anomaly_score", "REAL"), ("failure_type", "TEXT")]:
+            existing = {row[1] for row in connection.execute("PRAGMA table_info(health_events)")}
+            if column not in existing:
+                connection.execute(f"ALTER TABLE health_events ADD COLUMN {column} {definition}")
 
 
 def log_prediction(result: dict) -> None:
@@ -51,20 +63,21 @@ def log_prediction(result: dict) -> None:
     with _connection() as connection:
         connection.execute(
             """INSERT INTO prediction_events
-               (created_at, fraud_probability, decision, anomaly_detected, anomaly_score, explanation_generated)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (datetime.now(timezone.utc).isoformat(), result["fraud_probability"], result["decision"], int(result["anomaly_detected"]), result["anomaly_score"], int(result["explanation_generated"])),
+               (created_at, fraud_probability, decision, anomaly_detected, anomaly_score, explanation_generated,
+                model_version, model_stage, validation_status, drift_status, skew_status, health_score, failure_type, severity)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (datetime.now(timezone.utc).isoformat(), result["fraud_probability"], result["decision"], int(result["anomaly_detected"]), result["anomaly_score"], int(result["explanation_generated"]), result.get("model_version"), result.get("model_stage"), result.get("validation_status"), None, None, None, "prediction_anomaly" if result["anomaly_detected"] else None, "warning" if result["anomaly_detected"] else "normal"),
         )
 
 
-def log_health(result: dict) -> None:
+def log_health(result: dict, signals: dict) -> None:
     """Persist each explicit unified health assessment."""
     initialize_database()
     with _connection() as connection:
         connection.execute(
-            """INSERT INTO health_events (created_at, health_score, status, severity)
-               VALUES (?, ?, ?, ?)""",
-            (datetime.now(timezone.utc).isoformat(), result["health_score"], result["status"], result["severity"]),
+            """INSERT INTO health_events (created_at, health_score, status, severity, validation_status, drift_status, skew_status, anomaly_score, failure_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (datetime.now(timezone.utc).isoformat(), result["health_score"], result["status"], result["severity"], "passed" if signals["validation_passed"] else "failed", "drift_detected" if signals["drift_detected"] else "stable", "skew_detected" if signals["skew_detected"] else "consistent", -1.0 if signals["anomaly_detected"] else 0.0, ",".join(result["failure_types"]) or None),
         )
 
 

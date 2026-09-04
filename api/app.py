@@ -18,6 +18,7 @@ from monitoring.skew import assess_skew
 from monitoring.health_score import calculate_health_score
 from monitoring.validation import validate_features
 from utils.features import prepare_features
+from utils.mlflow_tracking import configure_mlflow, read_model_manifest
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 
@@ -48,9 +49,19 @@ def load_model_bundle() -> dict[str, Any]:
     """Load the production model bundle once per running API process."""
     if not settings.model_path.exists():
         raise FileNotFoundError("No trained model artifact found.")
-    bundle = joblib.load(settings.model_path)
+    manifest = read_model_manifest()
+    if manifest.get("model_uri") and manifest.get("model_version") != "local":
+        try:
+            mlflow = configure_mlflow()
+            bundle = {"pipeline": mlflow.sklearn.load_model(manifest["model_uri"]), "alert_threshold": manifest["alert_threshold"]}
+        except Exception:
+            bundle = joblib.load(settings.model_path)
+    else:
+        bundle = joblib.load(settings.model_path)
     if not isinstance(bundle, dict) or "pipeline" not in bundle or "alert_threshold" not in bundle:
         raise ValueError("The saved model artifact has an unexpected format.")
+    bundle["model_version"] = manifest.get("model_version", "local")
+    bundle["model_stage"] = manifest.get("model_stage", "Fallback")
     return bundle
 
 
@@ -98,6 +109,8 @@ def predict(transaction: TransactionRequest) -> PredictionResponse:
         anomaly_score=anomaly_result["anomaly_score"],
         explanation_generated=should_explain,
         top_feature_contributions=contributions,
+        model_version=str(model_bundle["model_version"]),
+        model_stage=str(model_bundle["model_stage"]),
     )
     log_prediction(response.model_dump())
     return response
@@ -136,7 +149,7 @@ def monitor_skew(request: SkewRequest) -> dict[str, Any]:
 def monitor_health(request: HealthRequest) -> dict[str, Any]:
     """Combine validation, drift, anomaly, and skew findings into one health score."""
     result = calculate_health_score(request.model_dump())
-    log_health(result)
+    log_health(result, request.model_dump())
     return result
 
 

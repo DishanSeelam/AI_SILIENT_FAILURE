@@ -11,15 +11,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from monitoring.health_score import calculate_health_score
 from database.event_store import recent_events
+from utils.mlflow_tracking import read_model_manifest
 
 
 METRICS_PATH = PROJECT_ROOT / "models" / "training_metrics.json"
 PROFILE_PATH = PROJECT_ROOT / "models" / "reference_profile.json"
 DRIFT_RESULT_PATH = PROJECT_ROOT / "logs" / "drift_experiment_result.json"
+FAILURE_RESULTS_PATH = PROJECT_ROOT / "logs" / "controlled_failure_experiments.json"
 
 
 @st.cache_data
@@ -43,6 +46,13 @@ st.caption("MLOps monitoring dashboard · e-commerce fraud detection")
 metrics = load_json(str(METRICS_PATH))
 profile = load_json(str(PROFILE_PATH))
 drift_result = load_json(str(DRIFT_RESULT_PATH))
+failure_results = load_json(str(FAILURE_RESULTS_PATH))
+model_manifest = read_model_manifest()
+
+model_left, model_right, model_third = st.columns(3)
+model_left.metric("Active model version", f"v{model_manifest.get('model_version', 'local')}")
+model_right.metric("Model lifecycle stage", model_manifest.get("model_stage", "Fallback"))
+model_third.caption("MLflow tracks parameters, metrics, artifacts, and registered model versions.")
 
 if metrics is None:
     st.warning("No trained model metrics found. Run `scripts/train_model.py` first.")
@@ -123,6 +133,35 @@ with profile_column:
             st.caption(f"{feature}: {', '.join(details['categories'])}")
 
 st.caption("Refresh the page after training or running a monitoring experiment to load the latest artifacts.")
+
+st.divider()
+st.subheader("Controlled Failure Experiments")
+if failure_results is None:
+    st.info("Run `scripts/run_failure_experiments.py` to generate Normal, Drift, Anomaly, Skew, and Combined evidence.")
+else:
+    failure_rows = [
+        {"experiment": name, "expected_failure": value["expected_failure"], "health_score": value["health"]["health_score"], "severity": value["health"]["severity"]}
+        for name, value in failure_results["experiments"].items()
+    ]
+    failure_table = pd.DataFrame(failure_rows)
+    failure_table["scenario"] = failure_table["experiment"].map(
+        {
+            "A_normal": "Normal", "B_data_drift": "Data drift", "C_anomaly": "Anomaly",
+            "D_training_serving_skew": "Serving skew", "E_combined": "Combined failures",
+        }
+    )
+    chart = px.bar(
+        failure_table, x="scenario", y="health_score", color="severity", text="health_score",
+        category_orders={"severity": ["normal", "warning", "critical"]},
+        color_discrete_map={"normal": "#2E8B57", "warning": "#E69F00", "critical": "#D1495B"},
+        labels={"scenario": "Controlled scenario", "health_score": "Unified health score"},
+    )
+    chart.update_traces(texttemplate="%{text}/100", textposition="outside", cliponaxis=False)
+    chart.update_yaxes(range=[0, 110], dtick=20)
+    chart.update_layout(showlegend=True, margin=dict(l=0, r=0, t=15, b=0))
+    st.plotly_chart(chart, use_container_width=True)
+    st.dataframe(failure_table, use_container_width=True)
+    st.write("Silent-failure detector metrics", failure_results["silent_failure_detector_metrics"])
 
 st.divider()
 st.subheader("Monitoring Event History")

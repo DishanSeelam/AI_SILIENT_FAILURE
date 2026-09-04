@@ -24,6 +24,9 @@ logs/*
 *.db
 *.sqlite
 *.sqlite3
+mlruns/
+mlartifacts/
+database/mlflow_tracking.db
 
 # Notebook checkpoints and editors
 .ipynb_checkpoints/

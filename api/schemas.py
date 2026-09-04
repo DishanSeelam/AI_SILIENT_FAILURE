@@ -41,6 +41,8 @@ class PredictionResponse(BaseModel):
     anomaly_score: float
     explanation_generated: bool
     top_feature_contributions: list[dict] = []
+    model_version: str
+    model_stage: str
 
 
 class DriftRequest(BaseModel):

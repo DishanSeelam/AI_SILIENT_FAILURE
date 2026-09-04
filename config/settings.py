@@ -1,6 +1,7 @@
 """Central, dependency-free application settings."""
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 
@@ -18,6 +19,13 @@ class Settings:
     reference_data_path: Path = PROJECT_ROOT / "models" / "reference_features.csv"
     anomaly_model_path: Path = PROJECT_ROOT / "models" / "anomaly_detector.joblib"
     training_contract_path: Path = PROJECT_ROOT / "models" / "training_contract.json"
+    # SQLite is the supported local backend for modern MLflow and its Model Registry.
+    mlflow_tracking_uri: str = os.getenv(
+        "MLFLOW_TRACKING_URI", f"sqlite:///{(PROJECT_ROOT / 'database' / 'mlflow_tracking.db').as_posix()}"
+    )
+    mlflow_experiment_name: str = "Fraud Detection Experiments v4"
+    registered_model_name: str = "FraudDetectionModel"
+    mlflow_model_uri: str = os.getenv("MLFLOW_MODEL_URI", "")
     psi_warning_threshold: float = 0.20
     ks_significance_level: float = 0.05
     health_warning_threshold: float = 70.0

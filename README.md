@@ -122,6 +122,31 @@ Flagged fraud alerts and prediction anomalies return top SHAP feature contributi
 Successful predictions and health assessments are stored locally in
 `database/monitoring_events.sqlite3` and displayed in the dashboard history.
 
+## MLflow experiments and model registry
+
+Install the updated project dependencies, then run three tracked experiments:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\run_mlflow_experiments.py
+.\.venv\Scripts\python.exe -m mlflow ui --backend-store-uri sqlite:///database/mlflow_tracking.db --default-artifact-root .\mlartifacts
+```
+
+Open `http://127.0.0.1:5000` to compare runs in **Fraud Detection Experiments v4**. Each run logs parameters,
+accuracy, precision, recall, F1, F2, ROC-AUC, PR-AUC, the model, training
+metrics, and monitoring artifacts. The final run registers `FraudDetectionModel`
+and writes its version to `models/model_manifest.json`; the API uses it when
+available and falls back to `models/fraud_model.joblib` if registry loading fails.
+
+## Controlled failure experiments
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_failure_experiments.py
+```
+
+This produces Normal, Data Drift, Prediction Anomaly, Training-Serving Skew, and
+Combined-failure results in `logs/controlled_failure_experiments.json`.
+
 ## License
 
 Add a license before publishing the repository.
