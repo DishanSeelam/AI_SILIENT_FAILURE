@@ -1,1 +1,1 @@
-"""SQLite persistence package for monitoring history."""
+"""Local persistence helpers."""

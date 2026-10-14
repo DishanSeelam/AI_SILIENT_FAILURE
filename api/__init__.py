@@ -1,1 +1,1 @@
-"""HTTP API package."""
+"""Prediction service package."""

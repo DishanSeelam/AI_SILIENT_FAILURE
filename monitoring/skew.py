@@ -1,32 +1,20 @@
-"""Training-serving skew checks for feature and preprocessing contracts."""
+"""Training-serving feature-contract checks."""
+import json
+from config.settings import CONTRACT_PATH
 
 
-def assess_skew(training_profile: dict, serving_profile: dict) -> dict:
-    """Compare expected and serving feature contracts and report mismatches."""
-    expected_columns = training_profile["feature_columns"]
-    received_columns = serving_profile["feature_columns"]
-    missing_features = [column for column in expected_columns if column not in received_columns]
-    unexpected_features = [column for column in received_columns if column not in expected_columns]
-    order_matches = expected_columns == received_columns
-    expected_version = training_profile["preprocessing_version"]
-    received_version = serving_profile["preprocessing_version"]
-    issues: list[str] = []
-    if missing_features:
-        issues.append(f"Missing features: {', '.join(missing_features)}.")
-    if unexpected_features:
-        issues.append(f"Unexpected features: {', '.join(unexpected_features)}.")
-    if not order_matches and not missing_features and not unexpected_features:
-        issues.append("Feature order differs from the training contract.")
-    if expected_version != received_version:
-        issues.append(
-            f"Preprocessing version mismatch: expected '{expected_version}', "
-            f"received '{received_version}'."
-        )
-    return {
-        "status": "skew_detected" if issues else "consistent",
-        "missing_features": missing_features,
-        "unexpected_features": unexpected_features,
-        "feature_order_matches": order_matches,
-        "preprocessing_version_matches": expected_version == received_version,
-        "issues": issues,
-    }
+def assess_skew(serving_columns, preprocessing_version="1.0.0"):
+    if not CONTRACT_PATH.exists():
+        return {"status": "unavailable", "issues": ["Train a model first."]}
+    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+    expected = contract["feature_columns"]
+    missing = [item for item in expected if item not in serving_columns]
+    unexpected = [item for item in serving_columns if item not in expected]
+    order_matches = list(serving_columns) == expected
+    version_matches = preprocessing_version == contract["preprocessing_version"]
+    issues = ([f"Missing feature: {x}" for x in missing] + [f"Unexpected feature: {x}" for x in unexpected] +
+              ([] if order_matches else ["Feature order differs from the training contract."]) +
+              ([] if version_matches else ["Preprocessing version differs from the training contract."]))
+    return {"status": "consistent" if not issues else "skew_detected", "missing_features": missing,
+            "unexpected_features": unexpected, "feature_order_matches": order_matches,
+            "preprocessing_version_matches": version_matches, "issues": issues}

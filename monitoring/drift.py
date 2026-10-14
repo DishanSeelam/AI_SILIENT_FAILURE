@@ -1,54 +1,53 @@
-"""Numerical data-drift detection using PSI and Kolmogorov-Smirnov tests."""
-
+"""Batch distribution drift checks using PSI and Kolmogorov-Smirnov tests."""
 import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp
-
-from config.settings import settings
-from utils.features import NUMERIC_FEATURES
+from config.settings import CATEGORICAL_FEATURES, NUMERIC_FEATURES
 
 
-def population_stability_index(reference: pd.Series, current: pd.Series, bins: int = 10) -> float:
-    """Calculate PSI; values above 0.20 indicate meaningful distribution change."""
-    reference_values = reference.dropna().astype(float).to_numpy()
-    current_values = current.dropna().astype(float).to_numpy()
-    if len(reference_values) == 0 or len(current_values) == 0:
-        return 0.0
-
-    edges = np.unique(np.percentile(reference_values, np.linspace(0, 100, bins + 1)))
+def psi(reference, current, bins=10):
+    edges = np.unique(np.quantile(reference, np.linspace(0, 1, bins + 1)))
     if len(edges) < 3:
         return 0.0
-    edges[0], edges[-1] = -np.inf, np.inf
-    reference_count, _ = np.histogram(reference_values, bins=edges)
-    current_count, _ = np.histogram(current_values, bins=edges)
-    epsilon = 1e-6
-    reference_share = reference_count / len(reference_values) + epsilon
-    current_share = current_count / len(current_values) + epsilon
-    return float(np.sum((current_share - reference_share) * np.log(current_share / reference_share)))
+    ref, _ = np.histogram(reference, bins=edges)
+    cur, _ = np.histogram(current, bins=edges)
+    ref_rate = np.clip(ref / max(ref.sum(), 1), 1e-6, None)
+    cur_rate = np.clip(cur / max(cur.sum(), 1), 1e-6, None)
+    return float(np.sum((cur_rate - ref_rate) * np.log(cur_rate / ref_rate)))
 
 
-def assess_drift(reference_data: pd.DataFrame, current_data: pd.DataFrame) -> dict:
-    """Assess numerical feature drift for a current batch against a baseline."""
-    feature_results: dict[str, dict[str, float | bool]] = {}
-    drifted_features: list[str] = []
+def categorical_psi(reference, current):
+    cats = sorted(set(reference.astype(str)) | set(current.astype(str)))
+    ref = reference.astype(str).value_counts(normalize=True)
+    cur = current.astype(str).value_counts(normalize=True)
+    total = 0.0
+    for category in cats:
+        a, b = max(ref.get(category, 0), 1e-6), max(cur.get(category, 0), 1e-6)
+        total += (b - a) * np.log(b / a)
+    return float(total)
+
+
+def assess_drift(reference: pd.DataFrame, current: pd.DataFrame):
+    results = []
     for column in NUMERIC_FEATURES:
-        psi = population_stability_index(reference_data[column], current_data[column])
-        ks_statistic, ks_p_value = ks_2samp(
-            reference_data[column].dropna(), current_data[column].dropna()
-        )
-        has_drift = psi >= settings.psi_warning_threshold or ks_p_value < settings.ks_significance_level
-        feature_results[column] = {
-            "psi": round(float(psi), 4),
-            "ks_statistic": round(float(ks_statistic), 4),
-            "ks_p_value": round(float(ks_p_value), 6),
-            "drift_detected": bool(has_drift),
-        }
-        if has_drift:
-            drifted_features.append(column)
-
-    return {
-        "status": "drift_detected" if drifted_features else "stable",
-        "batch_size": int(len(current_data)),
-        "drifted_features": drifted_features,
-        "feature_results": feature_results,
-    }
+        if column not in reference or column not in current:
+            continue
+        ref, cur = reference[column].dropna(), current[column].dropna()
+        if len(ref) < 10 or len(cur) < 10:
+            continue
+        value = psi(ref, cur)
+        _, p_value = ks_2samp(ref, cur)
+        detected = value >= .20 or p_value < .05
+        results.append({"feature": column, "type": "numeric", "psi": round(value, 4),
+                        "ks_p_value": round(float(p_value), 6), "drift_detected": detected})
+    for column in CATEGORICAL_FEATURES:
+        if column not in reference or column not in current:
+            continue
+        value = categorical_psi(reference[column], current[column])
+        unseen = sorted(set(current[column].astype(str)) - set(reference[column].astype(str)))
+        detected = value >= .20 or bool(unseen)
+        results.append({"feature": column, "type": "categorical", "psi": round(value, 4),
+                        "unseen_categories": unseen, "drift_detected": detected})
+    drifted = [item for item in results if item["drift_detected"]]
+    return {"status": "drift_detected" if drifted else "stable", "drifted_features": len(drifted),
+            "features": results, "thresholds": {"psi": .20, "ks_p_value": .05}}

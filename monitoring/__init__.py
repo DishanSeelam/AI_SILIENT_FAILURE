@@ -1,1 +1,1 @@
-"""Monitoring interfaces for silent-failure detection."""
+"""Silent-failure monitoring modules."""

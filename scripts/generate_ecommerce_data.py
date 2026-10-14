@@ -1,122 +1,84 @@
-"""Generate a reproducible synthetic e-commerce fraud-detection dataset.
+"""Generate a reproducible synthetic e-commerce fraud dataset.
 
-The data is deliberately synthetic: it contains no real customer information and
-is suitable for a student MLOps project.  ``is_fraudulent`` is the target label.
+The data contains realistic-looking relationships but is entirely simulated.  It is
+for system evaluation only, not a substitute for a real, governed fraud dataset.
 """
-
-from __future__ import annotations
-
+import argparse
 import csv
+import math
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
-SEED = 20260718
-ROW_COUNT = 2_000
-OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "raw" / "ecommerce_transactions.csv"
-
-COUNTRIES = ["India", "United States", "United Kingdom", "Canada", "Australia", "Germany"]
-CATEGORIES = ["Electronics", "Fashion", "Home & Kitchen", "Beauty", "Sports", "Books"]
-PAYMENT_METHODS = ["Credit Card", "Debit Card", "UPI", "Wallet", "Cash on Delivery"]
-DEVICES = ["Mobile", "Desktop", "Tablet"]
-MEMBERSHIP_TIERS = ["Standard", "Silver", "Gold", "Platinum"]
-FIELDNAMES = [
-    "transaction_id",
-    "transaction_timestamp",
-    "customer_id",
-    "customer_age",
-    "country",
-    "membership_tier",
-    "customer_tenure_days",
-    "product_category",
-    "items_count",
-    "unit_price",
-    "discount_percent",
-    "order_value",
-    "payment_method",
-    "device_type",
-    "shipping_distance_km",
-    "delivery_days_estimate",
-    "is_weekend",
-    "hour_of_day",
-    "previous_orders",
-    "previous_chargebacks",
-    "is_fraudulent",
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "data" / "raw" / "ecommerce_transactions.csv"
+FIELDS = [
+    "transaction_timestamp", "customer_age", "country", "membership_tier",
+    "customer_tenure_days", "product_category", "items_count", "unit_price",
+    "discount_percent", "order_value", "payment_method", "device_type",
+    "shipping_distance_km", "delivery_days_estimate", "is_weekend", "hour_of_day",
+    "previous_orders", "previous_chargebacks", "is_fraudulent",
 ]
 
 
-def generate_rows() -> list[dict[str, object]]:
-    """Return realistic-but-synthetic transaction rows with a learnable target."""
-    rng = random.Random(SEED)
-    start = datetime(2025, 1, 1)
-    rows: list[dict[str, object]] = []
-
-    for number in range(1, ROW_COUNT + 1):
-        timestamp = start + timedelta(minutes=rng.randint(0, 525_599))
-        age = max(18, min(75, round(rng.gauss(34, 10))))
-        category = rng.choice(CATEGORIES)
-        items = rng.choices([1, 2, 3, 4, 5], weights=[45, 28, 15, 8, 4])[0]
-        unit_price = round(rng.lognormvariate(4.2, 0.75), 2)
-        discount = rng.choice([0, 0, 0, 5, 10, 15, 20, 30])
-        order_value = round(items * unit_price * (1 - discount / 100), 2)
-        payment = rng.choices(PAYMENT_METHODS, weights=[34, 23, 24, 12, 7])[0]
-        device = rng.choices(DEVICES, weights=[65, 29, 6])[0]
-        tenure = rng.randint(0, 2_500)
-        previous_orders = max(0, int(rng.gauss(tenure / 100, 4)))
-        chargebacks = 0 if rng.random() < 0.96 else rng.choice([1, 2])
-        hour = timestamp.hour
-        distance = round(rng.triangular(2, 1_500, 220), 1)
-        delivery_days = max(1, min(12, round(2 + distance / 250 + rng.random() * 2)))
-
-        # Higher-risk patterns create a non-random target for the future classifier.
-        risk = 0.012
-        risk += 0.21 if chargebacks > 0 else 0
-        risk += 0.07 if order_value > 800 else 0
-        risk += 0.05 if tenure < 30 else 0
-        risk += 0.04 if hour in {0, 1, 2, 3, 4, 5} else 0
-        risk += 0.03 if payment == "Credit Card" and device == "Desktop" else 0
-        risk -= 0.02 if previous_orders > 15 else 0
-        is_fraudulent = int(rng.random() < min(risk, 0.65))
-
-        rows.append(
-            {
-                "transaction_id": f"TXN{number:07d}",
-                "transaction_timestamp": timestamp.isoformat(timespec="minutes"),
-                "customer_id": f"CUST{rng.randint(1, 850):05d}",
-                "customer_age": age,
-                "country": rng.choice(COUNTRIES),
-                "membership_tier": rng.choices(MEMBERSHIP_TIERS, weights=[58, 24, 13, 5])[0],
-                "customer_tenure_days": tenure,
-                "product_category": category,
-                "items_count": items,
-                "unit_price": unit_price,
-                "discount_percent": discount,
-                "order_value": order_value,
-                "payment_method": payment,
-                "device_type": device,
-                "shipping_distance_km": distance,
-                "delivery_days_estimate": delivery_days,
-                "is_weekend": int(timestamp.weekday() >= 5),
-                "hour_of_day": hour,
-                "previous_orders": previous_orders,
-                "previous_chargebacks": chargebacks,
-                "is_fraudulent": is_fraudulent,
-            }
-        )
-    return rows
+def sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-max(-25, min(25, x))))
 
 
-def main() -> None:
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    rows = generate_rows()
-    with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=FIELDNAMES)
+def make_row(rng: random.Random, start: datetime) -> dict:
+    timestamp = start + timedelta(minutes=rng.randrange(365 * 24 * 60))
+    country = rng.choices(["India", "United States", "United Kingdom", "Germany", "UAE"], [50, 17, 12, 11, 10])[0]
+    tier = rng.choices(["Basic", "Standard", "Premium"], [0.40, 0.45, 0.15])[0]
+    category = rng.choices(["Electronics", "Fashion", "Groceries", "Beauty", "Home"], [0.28, .25, .19, .12, .16])[0]
+    payment = rng.choices(["Credit Card", "Debit Card", "UPI", "Wallet", "Cash on Delivery"], [.34, .21, .24, .13, .08])[0]
+    device = rng.choices(["Mobile", "Desktop", "Tablet"], [.69, .25, .06])[0]
+    age = max(18, min(80, round(rng.gauss(34, 11))))
+    tenure = max(0, int(rng.expovariate(1 / 520)))
+    items = rng.randint(1, 7)
+    unit_price = round(max(40, rng.lognormvariate(6.2, .72)), 2)
+    discount = rng.choices([0, 5, 10, 15, 20, 30, 40], [30, 18, 20, 14, 9, 6, 3])[0]
+    order_value = round(items * unit_price * (1 - discount / 100), 2)
+    distance = round(min(2500, rng.lognormvariate(5.8, .82)), 1)
+    delivery = max(1, min(12, round(2 + distance / 310 + rng.gauss(0, 1.2))))
+    previous_orders = max(0, int(rng.expovariate(1 / 18)))
+    chargebacks = rng.choices([0, 1, 2, 3], [.94, .045, .012, .003])[0]
+    weekend = int(timestamp.weekday() >= 5)
+    hour = timestamp.hour
+    # Signal is deliberately distributed across several features: no single target-leaking column.
+    risk = -3.15
+    risk += 1.45 * min(chargebacks, 2)
+    risk += 1.00 * int(tenure < 25) + .55 * int(previous_orders == 0)
+    risk += .85 * int(order_value > 2400) + .48 * int(distance > 1200)
+    risk += .48 * int(hour <= 4) + .32 * int(payment == "Credit Card")
+    risk += .30 * int(device == "Desktop") + .25 * int(category == "Electronics")
+    risk += .25 * int(discount >= 30) + rng.gauss(0, .72)
+    fraud = int(rng.random() < sigmoid(risk))
+    return {
+        "transaction_timestamp": timestamp.isoformat(), "customer_age": age, "country": country,
+        "membership_tier": tier, "customer_tenure_days": tenure, "product_category": category,
+        "items_count": items, "unit_price": unit_price, "discount_percent": discount,
+        "order_value": order_value, "payment_method": payment, "device_type": device,
+        "shipping_distance_km": distance, "delivery_days_estimate": delivery,
+        "is_weekend": weekend, "hour_of_day": hour, "previous_orders": previous_orders,
+        "previous_chargebacks": chargebacks, "is_fraudulent": fraud,
+    }
+
+
+def main(rows: int, seed: int) -> None:
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(seed)
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    with OUT.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
-    fraud_count = sum(row["is_fraudulent"] for row in rows)
-    print(f"Created {OUTPUT_PATH} with {len(rows)} rows ({fraud_count} fraudulent transactions).")
+        for _ in range(rows):
+            writer.writerow(make_row(rng, start))
+    print(f"Created {OUT} with {rows:,} synthetic rows (seed={seed}).")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rows", type=int, default=12000)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    main(args.rows, args.seed)

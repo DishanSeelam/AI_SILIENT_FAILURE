@@ -1,31 +1,20 @@
-"""Run comparable tracked experiments and register the selected final model."""
-
-from __future__ import annotations
-
+"""Run comparable baseline and ensemble fraud-model experiments."""
 import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = sys.executable
-TRAIN_SCRIPT = ROOT / "scripts" / "train_model.py"
-
-EXPERIMENTS = [
+RUNS = [
     ("logistic-baseline", ["--model-type", "logistic_regression"]),
-    ("rf-baseline", ["--model-type", "random_forest", "--n-estimators", "200", "--min-samples-leaf", "3"]),
-    ("rf-optimized", ["--model-type", "random_forest", "--n-estimators", "500", "--min-samples-leaf", "1", "--register"]),
+    ("rf-baseline", ["--model-type", "random_forest", "--n-estimators", "300", "--min-samples-leaf", "3"]),
+    ("extra-trees", ["--model-type", "extra_trees", "--n-estimators", "400", "--min-samples-leaf", "2"]),
+    ("rf-optimized", ["--model-type", "random_forest", "--n-estimators", "600", "--min-samples-leaf", "1"]),
+    ("xgboost-baseline", ["--model-type", "xgboost", "--n-estimators", "350", "--max-depth", "5", "--learning-rate", "0.05", "--min-samples-leaf", "2"]),
+    ("xgboost-optimized", ["--model-type", "xgboost", "--n-estimators", "550", "--max-depth", "4", "--learning-rate", "0.04", "--min-samples-leaf", "2"]),
 ]
 
-
-def main() -> None:
-    """Create three MLflow runs; the final optimized run becomes the active registry version."""
-    for run_name, options in EXPERIMENTS:
-        command = [PYTHON, str(TRAIN_SCRIPT), "--run-name", run_name, *options]
-        print("Running:", " ".join(command))
-        subprocess.run(command, cwd=ROOT, check=True)
-    print("Completed three MLflow experiments. Open `mlflow ui --backend-store-uri ./mlruns` to compare them.")
-
-
-if __name__ == "__main__":
-    main()
+for name, options in RUNS:
+    print(f"\n--- {name} ---")
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "train_model.py"), "--run-name", name, *options],
+                   check=True, cwd=ROOT)
+print("\nCompleted six MLflow experiments. Select the top F2 run before deployment.")
