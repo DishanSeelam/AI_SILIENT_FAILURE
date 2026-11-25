@@ -32,6 +32,17 @@ def record(transaction: TransactionRequest):
     return data
 
 
+def validation_summary(rows: list[dict]):
+    """Keep profile validation observable without hiding an otherwise useful batch drift result."""
+    validations = [validate_record(row) for row in rows]
+    issues = [issue for validation in validations for issue in validation.get("issues", [])]
+    return {
+        "status": "passed" if not issues else "failed",
+        "invalid_records": sum(validation["status"] != "passed" for validation in validations),
+        "issues": issues[:100],
+    }
+
+
 @app.get("/")
 def root():
     return {"service": "AI Silent Failure Detection", "docs": "/docs"}
@@ -74,10 +85,10 @@ def monitor_assess(request: MonitorRequest):
     if len(request.transactions) < 10:
         raise HTTPException(422, "Provide at least 10 transactions for a meaningful drift assessment.")
     raw = [record(item) for item in request.transactions]
-    validations = [validate_record(item) for item in raw]
-    valid = [item for item, result in zip(raw, validations) if result["status"] == "passed"]
-    if not valid:
-        raise HTTPException(422, "All provided transactions failed feature validation.")
+    validation = validation_summary(raw)
+    # Drift measures the entire production batch, including records with suspicious values.
+    # Validation is therefore reported independently rather than silently dropping them.
+    valid = raw
     reference = pd.read_csv(REFERENCE_PATH)
     current = pd.DataFrame(valid)
     drift = assess_drift(reference, current)
@@ -85,11 +96,8 @@ def monitor_assess(request: MonitorRequest):
     model, model_info = load_model()
     probabilities = model.predict_proba(current[FEATURE_COLUMNS])[:, 1]
     anomalies = [assess_anomaly(item, float(probability)) for item, probability in zip(valid, probabilities)]
-    validation_summary = {"status": "passed" if len(valid) == len(raw) else "failed",
-                          "invalid_records": len(raw) - len(valid),
-                          "issues": [v["issues"] for v in validations if v["status"] == "failed"]}
-    health = assess_health(validation_summary, drift, sum(a["anomaly_detected"] for a in anomalies), skew)
-    response = {"batch_size": len(raw), "valid_records": len(valid), "validation": validation_summary,
+    health = assess_health(validation, drift, sum(a["anomaly_detected"] for a in anomalies), skew)
+    response = {"batch_size": len(raw), "valid_records": len(valid), "validation": validation,
                 "drift": drift, "anomaly": {"anomaly_count": sum(a["anomaly_detected"] for a in anomalies),
                                                "sample_scores": anomalies[:10]},
                 "skew": skew, "health": health, "model_version": model_info.get("model_version", "local"),
@@ -102,11 +110,9 @@ def monitor_assess(request: MonitorRequest):
 def monitor_drift(request: DriftRequest):
     """Compatibility endpoint: assess numerical and categorical data drift in a batch."""
     rows = [record(item) for item in request.transactions]
-    validations = [validate_record(row) for row in rows]
-    errors = [issue for validation in validations for issue in validation.get("issues", [])]
-    if errors:
-        raise HTTPException(422, {"validation_errors": errors})
+    validation = validation_summary(rows)
     report = assess_drift(pd.read_csv(REFERENCE_PATH), pd.DataFrame(rows))
+    report["validation"] = validation
     log_event("drift", report)
     return report
 
@@ -115,13 +121,14 @@ def monitor_drift(request: DriftRequest):
 def monitor_anomaly(request: DriftRequest):
     """Score a batch for unusual input/prediction combinations."""
     rows = [record(item) for item in request.transactions]
+    validation = validation_summary(rows)
     model, model_info = load_model()
     probabilities = model.predict_proba(pd.DataFrame(rows)[FEATURE_COLUMNS])[:, 1]
     scores = [assess_anomaly(row, float(probability)) for row, probability in zip(rows, probabilities)]
     result = {"status": "anomalies_detected" if any(score["anomaly_detected"] for score in scores) else "normal",
               "anomaly_count": sum(score["anomaly_detected"] for score in scores),
               "batch_size": len(rows), "model_version": model_info.get("model_version", "local"),
-              "samples": scores[:20]}
+              "validation": validation, "samples": scores[:20]}
     log_event("anomaly", result)
     return result
 

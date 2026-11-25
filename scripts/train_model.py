@@ -104,8 +104,13 @@ def main(args):
               "fraud_rate": float(y.mean()), "metrics": {key: round(float(value), 6) for key, value in metrics.items()}}
     METRICS_PATH.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
-    import mlflow
-    import mlflow.sklearn
+    try:
+        import mlflow
+        import mlflow.sklearn
+    except ModuleNotFoundError:
+        print("MLflow is not installed: local model and monitoring artifacts were saved, but this run was not tracked.")
+        print(json.dumps(result, indent=2))
+        return
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
     params = {"model_type": args.model_type, "random_state": args.random_state,

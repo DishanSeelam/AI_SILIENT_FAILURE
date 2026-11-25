@@ -7,6 +7,13 @@ from config.settings import ROOT_DIR
 DB_PATH = ROOT_DIR / "database" / "monitoring_events.sqlite3"
 
 
+def _json_default(value):
+    """Convert NumPy/Pandas scalar values emitted by monitoring calculations for SQLite JSON storage."""
+    if hasattr(value, "item"):
+        return value.item()
+    return str(value)
+
+
 def initialise():
     with sqlite3.connect(DB_PATH) as connection:
         connection.execute("""CREATE TABLE IF NOT EXISTS monitoring_events (
@@ -17,7 +24,8 @@ def log_event(event_type, payload):
     initialise()
     with sqlite3.connect(DB_PATH) as connection:
         connection.execute("INSERT INTO monitoring_events(timestamp,event_type,payload) VALUES(?,?,?)",
-                           (datetime.now(timezone.utc).isoformat(), event_type, json.dumps(payload)))
+                           (datetime.now(timezone.utc).isoformat(), event_type,
+                            json.dumps(payload, default=_json_default)))
 
 
 def recent(limit=25):

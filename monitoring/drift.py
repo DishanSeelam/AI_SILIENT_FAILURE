@@ -37,7 +37,8 @@ def assess_drift(reference: pd.DataFrame, current: pd.DataFrame):
             continue
         value = psi(ref, cur)
         _, p_value = ks_2samp(ref, cur)
-        detected = value >= .20 or p_value < .05
+        # NumPy comparisons produce numpy.bool_, which FastAPI cannot JSON encode.
+        detected = bool(value >= .20 or p_value < .05)
         results.append({"feature": column, "type": "numeric", "psi": round(value, 4),
                         "ks_p_value": round(float(p_value), 6), "drift_detected": detected})
     for column in CATEGORICAL_FEATURES:
@@ -45,7 +46,7 @@ def assess_drift(reference: pd.DataFrame, current: pd.DataFrame):
             continue
         value = categorical_psi(reference[column], current[column])
         unseen = sorted(set(current[column].astype(str)) - set(reference[column].astype(str)))
-        detected = value >= .20 or bool(unseen)
+        detected = bool(value >= .20 or bool(unseen))
         results.append({"feature": column, "type": "categorical", "psi": round(value, 4),
                         "unseen_categories": unseen, "drift_detected": detected})
     drifted = [item for item in results if item["drift_detected"]]
